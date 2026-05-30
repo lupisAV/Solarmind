@@ -1,12 +1,13 @@
-import { useState, useCallback, useEffect } from 'react'
+import { lazy, Suspense, useState, useCallback, useEffect } from 'react'
 import SolarPulse from './components/SolarPulse'
 import StepIndicator from './components/StepIndicator'
 import DatasetUpload from './components/DatasetUpload'
-import RawDataPreview from './components/RawDataPreview'
-import CleaningStats from './components/CleaningStats'
-import MetricsDashboard from './components/MetricsDashboard'
-import FeatureImportance from './components/FeatureImportance'
-import TreeVisualizer from './components/TreeVisualizer'
+
+const RawDataPreview = lazy(() => import('./components/RawDataPreview'))
+const CleaningStats = lazy(() => import('./components/CleaningStats'))
+const MetricsDashboard = lazy(() => import('./components/MetricsDashboard'))
+const FeatureImportance = lazy(() => import('./components/FeatureImportance'))
+const TreeVisualizer = lazy(() => import('./components/TreeVisualizer'))
 
 const API_BASE = '/api'
 
@@ -22,6 +23,23 @@ function getStepIndex(stepId) {
   return STEPS.findIndex(s => s.id === stepId)
 }
 
+async function fetchJson(url, options) {
+  const res = await fetch(url, options)
+  let data = null
+
+  try {
+    data = await res.json()
+  } catch {
+    data = null
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.error || `Solicitud fallida (${res.status})`)
+  }
+
+  return data
+}
+
 export default function App() {
   const [currentStep, setCurrentStep] = useState('idle')
   const [rawData, setRawData] = useState(null)
@@ -34,8 +52,7 @@ export default function App() {
 
   const checkStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/status`)
-      const data = await res.json()
+      const data = await fetchJson(`${API_BASE}/status`)
       setStatus(data)
     } catch {
       setStatus({ status: 'offline' })
@@ -58,12 +75,11 @@ export default function App() {
 
   const loadRawData = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/data/raw?page=1&per_page=15`)
-      const data = await res.json()
+      const data = await fetchJson(`${API_BASE}/data/raw?page=1&per_page=100`)
       setRawData(data)
       return data
     } catch (err) {
-      setError('Error cargando datos crudos')
+      setError(err.message || 'Error cargando datos crudos')
       return null
     }
   }, [])
@@ -88,11 +104,10 @@ export default function App() {
 
     setCurrentStep('cleaning')
     try {
-      const statsRes = await fetch(`${API_BASE}/data/stats`)
-      const stats = await statsRes.json()
+      const stats = await fetchJson(`${API_BASE}/data/stats`)
       setCleaningStats(stats)
-    } catch {
-      setError('Error obteniendo estadísticas de limpieza')
+    } catch (err) {
+      setError(err.message || 'Error obteniendo estadísticas de limpieza')
       return
     }
 
@@ -100,11 +115,10 @@ export default function App() {
     setCurrentStep('training')
 
     try {
-      const simRes = await fetch(`${API_BASE}/simulate/run`, { method: 'POST' })
-      const simData = await simRes.json()
+      const simData = await fetchJson(`${API_BASE}/simulate/run`, { method: 'POST' })
       setResults(simData)
-    } catch {
-      setError('Error ejecutando simulación')
+    } catch (err) {
+      setError(err.message || 'Error ejecutando simulación')
       return
     }
 
@@ -181,96 +195,100 @@ export default function App() {
                 {datasetInfo?.rows?.toLocaleString()} filas &middot; {datasetInfo?.columns?.length} columnas
               </span>
             </div>
-            <span className="ds-badge">Listo para analizar</span>
+            <span className="ds-badge">
+              {datasetInfo?.generated ? 'Dataset de ejemplo' : 'Listo para analizar'}
+            </span>
           </div>
         )}
 
-        {currentStep !== 'idle' && rawData && (
-          <section className="section">
-            <h2 className="section-title">
-              <span className="section-number">01</span>
-              Dataset Crudo
-            </h2>
-            <RawDataPreview data={rawData} />
-          </section>
-        )}
-
-        {cleaningStats && currentStep !== 'idle' && (
-          <section className="section">
-            <h2 className="section-title">
-              <span className="section-number">02</span>
-              Estadísticas de Limpieza
-            </h2>
-            <CleaningStats stats={cleaningStats} />
-          </section>
-        )}
-
-        {results && (
-          <>
+        <Suspense fallback={<div className="loading-panel">Cargando vista...</div>}>
+          {currentStep !== 'idle' && rawData && (
             <section className="section">
               <h2 className="section-title">
-                <span className="section-number">03</span>
-                Métricas de Modelos
+                <span className="section-number">01</span>
+                Dataset Crudo
               </h2>
-              <MetricsDashboard metrics={{
-                regression: results.regression.metrics,
-                classification: results.classification.metrics,
-              }} />
+              <RawDataPreview data={rawData} />
             </section>
+          )}
 
+          {cleaningStats && currentStep !== 'idle' && (
             <section className="section">
               <h2 className="section-title">
-                <span className="section-number">04</span>
-                Importancia de Features
+                <span className="section-number">02</span>
+                Estadísticas de Limpieza
               </h2>
-              <FeatureImportance
-                regression={results.regression.feature_importance}
-                classification={results.classification.feature_importance}
-              />
+              <CleaningStats stats={cleaningStats} />
             </section>
+          )}
 
-            <section className="section">
-              <h2 className="section-title">
-                <span className="section-number">05</span>
-                Árboles de Decisión
-              </h2>
-              <div className="tree-grid">
-                <div className="tree-card">
-                  <h3 className="tree-card-title">Regresión</h3>
-                  <TreeVisualizer
-                    treeJson={results.regression.tree_json}
-                    treeText={results.regression.tree_text}
-                    type="regression"
-                  />
+          {results && (
+            <>
+              <section className="section">
+                <h2 className="section-title">
+                  <span className="section-number">03</span>
+                  Métricas de Modelos
+                </h2>
+                <MetricsDashboard metrics={{
+                  regression: results.regression.metrics,
+                  classification: results.classification.metrics,
+                }} />
+              </section>
+
+              <section className="section">
+                <h2 className="section-title">
+                  <span className="section-number">04</span>
+                  Importancia de Features
+                </h2>
+                <FeatureImportance
+                  regression={results.regression.feature_importance}
+                  classification={results.classification.feature_importance}
+                />
+              </section>
+
+              <section className="section">
+                <h2 className="section-title">
+                  <span className="section-number">05</span>
+                  Árboles de Decisión
+                </h2>
+                <div className="tree-grid">
+                  <div className="tree-card">
+                    <h3 className="tree-card-title">Regresión</h3>
+                    <TreeVisualizer
+                      treeJson={results.regression.tree_json}
+                      treeText={results.regression.tree_text}
+                      type="regression"
+                    />
+                  </div>
+                  <div className="tree-card">
+                    <h3 className="tree-card-title">Clasificación</h3>
+                    <TreeVisualizer
+                      treeJson={results.classification.tree_json}
+                      treeText={results.classification.tree_text}
+                      type="classification"
+                      classNames={results.classification.metrics.classes}
+                    />
+                  </div>
                 </div>
-                <div className="tree-card">
-                  <h3 className="tree-card-title">Clasificación</h3>
-                  <TreeVisualizer
-                    treeJson={results.classification.tree_json}
-                    treeText={results.classification.tree_text}
-                    type="classification"
-                    classNames={results.classification.metrics.classes}
-                  />
-                </div>
+              </section>
+
+              <div className="results-footer">
+                <button className="btn-home btn-home-large" onClick={handleGoHome}>
+                  <svg className="btn-icon-svg" viewBox="0 0 20 20" fill="none" width="16" height="16">
+                    <path d="M3 8l7-5 7 5v9a1 1 0 01-1 1H4a1 1 0 01-1-1V8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M8 18V10h4v8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Cargar otro dataset
+                </button>
               </div>
-            </section>
-
-            <div className="results-footer">
-              <button className="btn-home btn-home-large" onClick={handleGoHome}>
-                <svg className="btn-icon-svg" viewBox="0 0 20 20" fill="none" width="16" height="16">
-                  <path d="M3 8l7-5 7 5v9a1 1 0 01-1 1H4a1 1 0 01-1-1V8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M8 18V10h4v8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Cargar otro dataset
-              </button>
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </Suspense>
       </main>
 
       <footer className="app-footer">
         <span>Solarmind Analytics &copy; 2025</span>
-        <span>Proyecto Final — Minería de Datos</span>
+        <span>Proyecto Final - Minería de Datos</span>
       </footer>
     </div>
   )

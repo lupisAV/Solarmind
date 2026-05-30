@@ -21,11 +21,11 @@ def generate_dataframe(output_path=None):
 
     dias_transcurridos = np.array([(d - start_date).days for d in dates])
     day_of_year = dias_transcurridos % 365
-    season_factor = 0.5 + 0.5 * np.sin(2 * np.pi * (day_of_year - 80) / 365)
+    season_factor = 0.72 + 0.28 * np.sin(2 * np.pi * (day_of_year - 80) / 365)
 
     hora_efectiva = np.clip(hora_num - 6, 0, 12)
-    radiacion_base = 1000 * np.sin(np.pi * hora_efectiva / 12) * season_factor
-    radiacion_base *= (1 - nubosidad * 0.08)
+    radiacion_base = 1120 * np.sin(np.pi * hora_efectiva / 12) * season_factor
+    radiacion_base *= (1 - nubosidad * 0.06)
     radiacion_base += np.random.normal(0, 25, N)
     radiacion = np.clip(np.round(radiacion_base, 1), 0, 1200)
 

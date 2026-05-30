@@ -1,11 +1,14 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 import pandas as pd
+import numpy as np
 import json
 import os
 import io
+import re
+from uuid import uuid4
 
 from clean_and_model import (
     FEATURE_COLS, TARGET_COL, RADIATION_LABELS,
@@ -18,7 +21,11 @@ app = FastAPI(title="Solarmind Analytics API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000").split(",")
+        if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -28,10 +35,28 @@ DEFAULT_DATASET_PATH = os.path.join("data", "solar_radiation_dataset.csv")
 UPLOAD_DIR = os.path.join("data", "uploads")
 DATASET_PATH = DEFAULT_DATASET_PATH
 dataset_filename = None
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 result_cache = None
+
+
+def validate_dataset_columns(df):
+    required_cols = FEATURE_COLS + [TARGET_COL]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El CSV no contiene las columnas requeridas: {', '.join(missing_cols)}",
+        )
+
+
+def safe_upload_name(filename):
+    base = os.path.basename(filename or "dataset.csv")
+    stem, ext = os.path.splitext(base)
+    clean_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", stem).strip("._") or "dataset"
+    return f"uploaded_{clean_stem}_{uuid4().hex[:8]}{ext.lower()}"
 
 
 def set_active_dataset(path, filename=None):
@@ -39,6 +64,11 @@ def set_active_dataset(path, filename=None):
     DATASET_PATH = path
     dataset_filename = filename
     result_cache = None
+
+
+def json_safe_records(df):
+    safe_df = df.replace({np.nan: None})
+    return safe_df.to_dict(orient="records")
 
 
 def get_pipeline_results():
@@ -72,16 +102,21 @@ def status():
 
 @app.post("/api/dataset/upload")
 async def upload_dataset(file: UploadFile = File(...)):
-    if not file.filename.endswith(".csv"):
-        return {"error": "Solo se aceptan archivos CSV (.csv)"}
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos CSV (.csv)")
 
     contents = await file.read()
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="El archivo excede el limite de 10 MB")
+
     try:
         df = pd.read_csv(io.BytesIO(contents))
-    except Exception:
-        return {"error": "No se pudo leer el archivo CSV. Verifica el formato."}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="No se pudo leer el archivo CSV. Verifica el formato.") from exc
 
-    safe_name = f"uploaded_{os.path.splitext(file.filename)[0]}.csv"
+    validate_dataset_columns(df)
+
+    safe_name = safe_upload_name(file.filename)
     file_path = os.path.join(UPLOAD_DIR, safe_name)
     with open(file_path, "wb") as f:
         f.write(contents)
@@ -93,6 +128,24 @@ async def upload_dataset(file: UploadFile = File(...)):
         "rows": len(df),
         "columns": list(df.columns),
         "size_bytes": len(contents),
+    }
+
+
+@app.post("/api/dataset/example")
+def use_example_dataset():
+    if not os.path.exists(DEFAULT_DATASET_PATH):
+        raise HTTPException(status_code=404, detail="No existe el dataset de ejemplo")
+
+    df = pd.read_csv(DEFAULT_DATASET_PATH)
+    validate_dataset_columns(df)
+    set_active_dataset(DEFAULT_DATASET_PATH, "solar_radiation_dataset.csv")
+
+    return {
+        "filename": "solar_radiation_dataset.csv",
+        "rows": len(df),
+        "columns": list(df.columns),
+        "size_bytes": os.path.getsize(DEFAULT_DATASET_PATH),
+        "generated": True,
     }
 
 
@@ -145,12 +198,16 @@ def dataset_info():
 
 
 @app.get("/api/data/raw")
-def raw_data(page: int = 1, per_page: int = 50):
+def raw_data(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+):
     df = load_dataset(DATASET_PATH)
+    validate_dataset_columns(df)
     total = len(df)
     start = (page - 1) * per_page
     end = start + per_page
-    data = df.iloc[start:end].to_dict(orient="records")
+    data = json_safe_records(df.iloc[start:end])
 
     nulls_per_col = df[FEATURE_COLS + [TARGET_COL]].isnull().sum().to_dict()
     string_errors = 0
@@ -172,13 +229,17 @@ def raw_data(page: int = 1, per_page: int = 50):
 
 
 @app.get("/api/data/cleaned")
-def cleaned_data(page: int = 1, per_page: int = 50):
+def cleaned_data(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+):
     df = load_dataset(DATASET_PATH)
+    validate_dataset_columns(df)
     df_clean, stats = clean_dataset(df)
     total = len(df_clean)
     start = (page - 1) * per_page
     end = start + per_page
-    data = df_clean.iloc[start:end].to_dict(orient="records")
+    data = json_safe_records(df_clean.iloc[start:end])
 
     return {
         "data": data,
@@ -194,6 +255,7 @@ def cleaned_data(page: int = 1, per_page: int = 50):
 @app.get("/api/data/stats")
 def data_stats():
     df = load_dataset(DATASET_PATH)
+    validate_dataset_columns(df)
     _, stats = clean_dataset(df)
     return stats
 
