@@ -1,13 +1,14 @@
 @echo off
+cd /d "%~dp0"
+
+if not exist "data" mkdir "data"
+
 echo =====================================
 echo   Solarmind Analytics - Iniciando
 echo =====================================
 echo.
 echo Instalando dependencias Python...
 pip install -r backend/requirements.txt
-echo.
-echo Generando dataset...
-python backend/generate_dataset.py
 echo.
 echo Construyendo frontend...
 cd frontend

@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import SolarPulse from './components/SolarPulse'
 import StepIndicator from './components/StepIndicator'
+import DatasetUpload from './components/DatasetUpload'
 import RawDataPreview from './components/RawDataPreview'
 import CleaningStats from './components/CleaningStats'
 import MetricsDashboard from './components/MetricsDashboard'
@@ -28,6 +29,8 @@ export default function App() {
   const [results, setResults] = useState(null)
   const [error, setError] = useState(null)
   const [status, setStatus] = useState(null)
+  const [datasetLoaded, setDatasetLoaded] = useState(false)
+  const [datasetInfo, setDatasetInfo] = useState(null)
 
   const checkStatus = useCallback(async () => {
     try {
@@ -37,6 +40,20 @@ export default function App() {
     } catch {
       setStatus({ status: 'offline' })
     }
+  }, [])
+
+  useEffect(() => {
+    checkStatus()
+  }, [checkStatus])
+
+  const handleDatasetReady = useCallback((info) => {
+    setDatasetInfo(info)
+    setDatasetLoaded(true)
+    setCurrentStep('idle')
+    setRawData(null)
+    setCleaningStats(null)
+    setResults(null)
+    setError(null)
   }, [])
 
   const loadRawData = useCallback(async () => {
@@ -49,6 +66,16 @@ export default function App() {
       setError('Error cargando datos crudos')
       return null
     }
+  }, [])
+
+  const handleGoHome = useCallback(() => {
+    setDatasetLoaded(false)
+    setDatasetInfo(null)
+    setCurrentStep('idle')
+    setRawData(null)
+    setCleaningStats(null)
+    setResults(null)
+    setError(null)
   }, [])
 
   const runSimulation = useCallback(async () => {
@@ -106,14 +133,25 @@ export default function App() {
       </header>
 
       <div className="simulation-controls">
-        <button
-          className="btn-primary"
-          onClick={runSimulation}
-          disabled={currentStep === 'loading' || currentStep === 'cleaning' || currentStep === 'training'}
-        >
-          <span className="btn-icon">&#9654;</span>
-          {currentStep === 'idle' ? 'Iniciar Simulación' : 'Reiniciar Simulación'}
-        </button>
+        <div className="controls-buttons">
+          <button
+            className="btn-primary"
+            onClick={runSimulation}
+            disabled={!datasetLoaded || currentStep === 'loading' || currentStep === 'cleaning' || currentStep === 'training'}
+          >
+            <span className="btn-icon">&#9654;</span>
+            {currentStep === 'idle' ? 'Iniciar Análisis' : 'Reiniciar Análisis'}
+          </button>
+          {results && (
+            <button className="btn-home" onClick={handleGoHome}>
+              <svg className="btn-icon-svg" viewBox="0 0 20 20" fill="none" width="16" height="16">
+                <path d="M3 8l7-5 7 5v9a1 1 0 01-1 1H4a1 1 0 01-1-1V8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M8 18V10h4v8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Nuevo Dataset
+            </button>
+          )}
+        </div>
         <StepIndicator steps={STEPS} currentIndex={stepIndex} />
       </div>
 
@@ -125,20 +163,25 @@ export default function App() {
       )}
 
       <main className="main-content">
-        {currentStep === 'idle' && (
-          <div className="welcome-screen">
-            <SolarPulse size={120} active={true} />
-            <h2>Solarmind Analytics</h2>
-            <p>
-              Pipeline completo de minería de datos: limpieza de dataset de radiación solar
-              y aplicación de árboles de decisión para regresión y clasificación.
-            </p>
-            <ul className="welcome-features">
-              <li><span className="bullet">&#9679;</span> 5,500+ registros con errores inyectados</li>
-              <li><span className="bullet">&#9679;</span> Limpieza automática (NaN, outliers, duplicados, cadenas)</li>
-              <li><span className="bullet">&#9679;</span> Árbol de decisión: regresión y clasificación</li>
-              <li><span className="bullet">&#9679;</span> Métricas, importancia de features y visualización del árbol</li>
-            </ul>
+        {!datasetLoaded && (
+          <DatasetUpload onDatasetReady={handleDatasetReady} />
+        )}
+
+        {datasetLoaded && currentStep === 'idle' && (
+          <div className="dataset-status-bar">
+            <svg className="ds-icon" viewBox="0 0 20 20" fill="none" width="18" height="18">
+              <rect x="3" y="1" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M7 7h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+              <path d="M7 10h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+              <path d="M7 13h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+            <div className="ds-info">
+              <span className="ds-filename">{datasetInfo?.filename}</span>
+              <span className="ds-meta">
+                {datasetInfo?.rows?.toLocaleString()} filas &middot; {datasetInfo?.columns?.length} columnas
+              </span>
+            </div>
+            <span className="ds-badge">Listo para analizar</span>
           </div>
         )}
 
@@ -196,6 +239,7 @@ export default function App() {
                   <h3 className="tree-card-title">Regresión</h3>
                   <TreeVisualizer
                     treeJson={results.regression.tree_json}
+                    treeText={results.regression.tree_text}
                     type="regression"
                   />
                 </div>
@@ -203,12 +247,23 @@ export default function App() {
                   <h3 className="tree-card-title">Clasificación</h3>
                   <TreeVisualizer
                     treeJson={results.classification.tree_json}
+                    treeText={results.classification.tree_text}
                     type="classification"
                     classNames={results.classification.metrics.classes}
                   />
                 </div>
               </div>
             </section>
+
+            <div className="results-footer">
+              <button className="btn-home btn-home-large" onClick={handleGoHome}>
+                <svg className="btn-icon-svg" viewBox="0 0 20 20" fill="none" width="16" height="16">
+                  <path d="M3 8l7-5 7 5v9a1 1 0 01-1 1H4a1 1 0 01-1-1V8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M8 18V10h4v8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Cargar otro dataset
+              </button>
+            </div>
           </>
         )}
       </main>
