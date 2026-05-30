@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 import pandas as pd
 import json
 import os
+import io
 
 from clean_and_model import (
     FEATURE_COLS, TARGET_COL, RADIATION_LABELS,
@@ -13,7 +14,7 @@ from clean_and_model import (
     tree_to_json
 )
 
-app = FastAPI(title="Solarmind Analytics API", version="1.0.0")
+app = FastAPI(title="Solarmind Analytics API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,9 +24,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATASET_PATH = os.path.join("data", "solar_radiation_dataset.csv")
+DEFAULT_DATASET_PATH = os.path.join("data", "solar_radiation_dataset.csv")
+UPLOAD_DIR = os.path.join("data", "uploads")
+DATASET_PATH = DEFAULT_DATASET_PATH
+dataset_filename = None
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 result_cache = None
+
+
+def set_active_dataset(path, filename=None):
+    global DATASET_PATH, dataset_filename, result_cache
+    DATASET_PATH = path
+    dataset_filename = filename
+    result_cache = None
 
 
 def get_pipeline_results():
@@ -38,12 +51,96 @@ def get_pipeline_results():
 
 @app.get("/api/status")
 def status():
-    return {
+    ds_exists = os.path.exists(DATASET_PATH)
+    info = {
         "status": "online",
-        "dataset_exists": os.path.exists(DATASET_PATH),
+        "dataset_exists": ds_exists,
+        "dataset_loaded": ds_exists,
+        "dataset_filename": dataset_filename or (os.path.basename(DATASET_PATH) if ds_exists else None),
         "feature_cols": FEATURE_COLS,
         "target_col": TARGET_COL,
         "radiation_labels": RADIATION_LABELS,
+    }
+    if ds_exists:
+        try:
+            df = pd.read_csv(DATASET_PATH, nrows=1)
+            info["dataset_columns"] = list(df.columns)
+        except Exception:
+            info["dataset_columns"] = []
+    return info
+
+
+@app.post("/api/dataset/upload")
+async def upload_dataset(file: UploadFile = File(...)):
+    if not file.filename.endswith(".csv"):
+        return {"error": "Solo se aceptan archivos CSV (.csv)"}
+
+    contents = await file.read()
+    try:
+        df = pd.read_csv(io.BytesIO(contents))
+    except Exception:
+        return {"error": "No se pudo leer el archivo CSV. Verifica el formato."}
+
+    safe_name = f"uploaded_{os.path.splitext(file.filename)[0]}.csv"
+    file_path = os.path.join(UPLOAD_DIR, safe_name)
+    with open(file_path, "wb") as f:
+        f.write(contents)
+
+    set_active_dataset(file_path, file.filename)
+
+    return {
+        "filename": file.filename,
+        "rows": len(df),
+        "columns": list(df.columns),
+        "size_bytes": len(contents),
+    }
+
+
+@app.get("/api/dataset/generate")
+def generate_dataset():
+    import generate_dataset as gendata
+    df = gendata.generate_dataframe()
+
+    output_path = os.path.join(UPLOAD_DIR, "generated_dataset.csv")
+    df.to_csv(output_path, index=False)
+
+    set_active_dataset(output_path, "generated_dataset.csv")
+
+    csv_buffer = io.StringIO()
+    df.to_csv(csv_buffer, index=False)
+    csv_content = csv_buffer.getvalue()
+
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=solar_radiation_dataset.csv",
+            "X-Dataset-Rows": str(len(df)),
+            "X-Dataset-Columns": ",".join(df.columns),
+        },
+    )
+
+
+@app.get("/api/dataset/info")
+def dataset_info():
+    if not os.path.exists(DATASET_PATH):
+        return {
+            "loaded": False,
+            "filename": None,
+            "rows": 0,
+            "columns": [],
+            "size_bytes": 0,
+        }
+
+    df = pd.read_csv(DATASET_PATH)
+    size_bytes = os.path.getsize(DATASET_PATH)
+
+    return {
+        "loaded": True,
+        "filename": dataset_filename or os.path.basename(DATASET_PATH),
+        "rows": len(df),
+        "columns": list(df.columns),
+        "size_bytes": size_bytes,
     }
 
 

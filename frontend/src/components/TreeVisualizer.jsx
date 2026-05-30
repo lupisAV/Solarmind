@@ -1,17 +1,68 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 const NODE_W = 200
 const NODE_H = 56
 const LEVEL_H = 100
+const GAP_X = 30
 
-export default function TreeVisualizer({ treeJson, type, classNames }) {
+export default function TreeVisualizer({ treeJson, treeText, type, classNames }) {
   const [selectedNode, setSelectedNode] = useState(null)
+  const [showSvg, setShowSvg] = useState(false)
+  const scrollRef = useRef(null)
 
-  if (!treeJson) return <div className="tree-empty">Árbol no disponible</div>
+  useEffect(() => {
+    if (scrollRef.current && treeJson && showSvg) {
+      const queue = [{ node: treeJson, layer: 0 }]
+      const layerMap = {}
 
-  const layers = []
-  const queue = [{ node: treeJson, x: 0, y: 0, layer: 0 }]
+      while (queue.length > 0) {
+        const { node, layer } = queue.shift()
+        if (!layerMap[layer]) layerMap[layer] = []
+        layerMap[layer].push(node)
+        if (!node.is_leaf) {
+          if (node.left) queue.push({ node: node.left, layer: layer + 1 })
+          if (node.right) queue.push({ node: node.right, layer: layer + 1 })
+        }
+      }
+
+      const maxLayer = Math.max(...Object.keys(layerMap).map(Number))
+      const totalWidth = Math.max(900, Math.pow(2, maxLayer) * (NODE_W + GAP_X))
+      const layerWidth = layerMap[0].length * (NODE_W + GAP_X)
+      const rootX = (totalWidth - layerWidth) / 2
+      const containerWidth = scrollRef.current.clientWidth
+      const scrollTo = Math.max(0, rootX - containerWidth / 2 + NODE_W / 2)
+
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollLeft = scrollTo
+        }
+      })
+    }
+  }, [treeJson, showSvg])
+
+  if (!treeJson && !treeText) {
+    return <div className="tree-empty">Árbol no disponible</div>
+  }
+
+  if (!showSvg) {
+    return (
+      <div className="tree-visualizer">
+        {treeText ? (
+          <pre className="tree-text-block">{treeText}</pre>
+        ) : (
+          <div className="tree-empty">Árbol no disponible</div>
+        )}
+        {treeJson && (
+          <button className="tree-text-toggle" onClick={() => setShowSvg(true)}>
+            Ver como gráfico
+          </button>
+        )}
+      </div>
+    )
+  }
+
   const layerMap = {}
+  const queue = [{ node: treeJson, layer: 0 }]
 
   while (queue.length > 0) {
     const { node, layer } = queue.shift()
@@ -25,19 +76,19 @@ export default function TreeVisualizer({ treeJson, type, classNames }) {
   }
 
   const maxLayer = Math.max(...Object.keys(layerMap).map(Number))
-  const totalWidth = Math.max(900, Math.pow(2, maxLayer) * (NODE_W + 20))
+  const totalWidth = Math.max(900, Math.pow(2, maxLayer) * (NODE_W + GAP_X))
 
   const nodePositions = {}
 
   Object.keys(layerMap).forEach(layerKey => {
     const layer = parseInt(layerKey)
     const nodes = layerMap[layer]
-    const layerWidth = nodes.length * (NODE_W + 30)
+    const layerWidth = nodes.length * (NODE_W + GAP_X)
     const startX = (totalWidth - layerWidth) / 2
 
     nodes.forEach((node, i) => {
       nodePositions[node.id] = {
-        x: startX + i * (NODE_W + 30),
+        x: startX + i * (NODE_W + GAP_X),
         y: layer * LEVEL_H + 30,
       }
     })
@@ -47,7 +98,11 @@ export default function TreeVisualizer({ treeJson, type, classNames }) {
 
   return (
     <div className="tree-visualizer">
-      <div className="tree-scroll">
+      <button className="tree-text-toggle" onClick={() => setShowSvg(false)}>
+        Ver como texto
+      </button>
+
+      <div className="tree-scroll" ref={scrollRef}>
         <svg
           width={totalWidth}
           height={maxY}
@@ -135,7 +190,7 @@ export default function TreeVisualizer({ treeJson, type, classNames }) {
                       fontFamily="JetBrains Mono, monospace"
                     >
                       {type === 'regression'
-                        ? `${node.prediction?.toFixed(1) ?? '?'} W/m²`
+                        ? `${node.prediction != null ? node.prediction.toFixed(1) : '?'} W/m²`
                         : classNames
                           ? classNames[node.predicted_class] ?? `Clase ${node.predicted_class}`
                           : `Clase ${node.predicted_class}`
@@ -183,14 +238,14 @@ export default function TreeVisualizer({ treeJson, type, classNames }) {
       </div>
 
       <div className="tree-legend">
-        <span className="legend-item">
-          <span className="legend-dot" style={{ background: 'rgba(245, 158, 11, 0.25)' }} /> Rama izquierda
+        <span className="tree-legend-item">
+          <span className="tree-legend-dot" style={{ background: 'rgba(245, 158, 11, 0.25)' }} /> Rama izquierda
         </span>
-        <span className="legend-item">
-          <span className="legend-dot" style={{ background: 'rgba(34, 211, 238, 0.25)' }} /> Rama derecha
+        <span className="tree-legend-item">
+          <span className="tree-legend-dot" style={{ background: 'rgba(34, 211, 238, 0.25)' }} /> Rama derecha
         </span>
-        <span className="legend-item">
-          <span className="legend-dot leaf" /> Nodo hoja
+        <span className="tree-legend-item">
+          <span className="tree-legend-dot leaf" /> Nodo hoja
         </span>
       </div>
     </div>
