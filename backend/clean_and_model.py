@@ -5,10 +5,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 import json
-import warnings
-
-warnings.filterwarnings("ignore")
-
 FEATURE_COLS = [
     "hora_numerica", "temperatura", "humedad", "presion_atmosferica",
     "velocidad_viento", "nubosidad", "angulo_zenital", "precipitacion"
@@ -16,7 +12,7 @@ FEATURE_COLS = [
 
 TARGET_COL = "radiacion_solar"
 
-RADIATION_BINS = [0, 300, 600, 900, 1200]
+RADIATION_BINS = [0, 250, 500, 750, 1300]
 RADIATION_LABELS = ["Baja", "Media", "Alta", "Muy Alta"]
 
 
@@ -26,6 +22,7 @@ def load_dataset(path="data/solar_radiation_dataset.csv"):
 
 
 def clean_dataset(df):
+    df = df.copy()
     stats = {"original_rows": len(df), "original_cols": len(df.columns)}
 
     numeric_cols = [c for c in FEATURE_COLS + [TARGET_COL] if c in df.columns]
@@ -130,6 +127,10 @@ def train_classification(df):
         "samples_train": len(X_train),
         "samples_test": len(X_test),
         "classes": RADIATION_LABELS,
+    }
+    metrics["class_distribution"] = {
+        label: int((y == label).sum())
+        for label in RADIATION_LABELS
     }
 
     cm = confusion_matrix(y_test, y_pred, labels=RADIATION_LABELS)

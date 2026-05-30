@@ -1,18 +1,44 @@
 import { useState, useRef, useCallback } from 'react'
 
 const API_BASE = '/api'
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+async function readJsonResponse(res) {
+  let data = null
+  try {
+    data = await res.json()
+  } catch {
+    data = null
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.error || `Solicitud fallida (${res.status})`)
+  }
+
+  return data
+}
 
 export default function DatasetUpload({ onDatasetReady }) {
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [generating, setGenerating] = useState(false)
+  const [usingExample, setUsingExample] = useState(false)
   const [datasetInfo, setDatasetInfo] = useState(null)
   const [error, setError] = useState(null)
   const fileInputRef = useRef(null)
 
+  const setReady = useCallback((info) => {
+    setDatasetInfo(info)
+    onDatasetReady(info)
+  }, [onDatasetReady])
+
   const uploadFile = useCallback(async (file) => {
-    if (!file.name.endsWith('.csv')) {
+    if (!file.name.toLowerCase().endsWith('.csv')) {
       setError('Solo se aceptan archivos CSV (.csv)')
+      return
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError('El archivo excede el limite de 10 MB')
       return
     }
 
@@ -27,22 +53,29 @@ export default function DatasetUpload({ onDatasetReady }) {
         method: 'POST',
         body: formData,
       })
-      const data = await res.json()
-
-      if (data.error) {
-        setError(data.error)
-        setUploading(false)
-        return
-      }
-
-      setDatasetInfo(data)
-      onDatasetReady(data)
-    } catch {
-      setError('Error al subir el archivo. Verifica la conexión con el servidor.')
+      const data = await readJsonResponse(res)
+      setReady(data)
+    } catch (err) {
+      setError(err.message || 'Error al subir el archivo. Verifica la conexion con el servidor.')
     } finally {
       setUploading(false)
     }
-  }, [onDatasetReady])
+  }, [setReady])
+
+  const handleUseExample = useCallback(async () => {
+    setError(null)
+    setUsingExample(true)
+
+    try {
+      const res = await fetch(`${API_BASE}/dataset/example`, { method: 'POST' })
+      const data = await readJsonResponse(res)
+      setReady(data)
+    } catch (err) {
+      setError(err.message || 'Error al activar el dataset de ejemplo.')
+    } finally {
+      setUsingExample(false)
+    }
+  }, [setReady])
 
   const handleDrop = useCallback((e) => {
     e.preventDefault()
@@ -67,44 +100,6 @@ export default function DatasetUpload({ onDatasetReady }) {
     e.target.value = ''
   }, [uploadFile])
 
-  const handleGenerate = useCallback(async () => {
-    setError(null)
-    setGenerating(true)
-
-    try {
-      const res = await fetch(`${API_BASE}/dataset/generate`)
-
-      const rowsHeader = res.headers.get('X-Dataset-Rows')
-      const colsHeader = res.headers.get('X-Dataset-Columns')
-
-      const blob = await res.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'solar_radiation_dataset.csv'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      window.URL.revokeObjectURL(url)
-
-      if (rowsHeader && colsHeader) {
-        const info = {
-          filename: 'solar_radiation_dataset.csv',
-          rows: parseInt(rowsHeader, 10),
-          columns: colsHeader.split(','),
-          size_bytes: blob.size,
-          generated: true,
-        }
-        setDatasetInfo(info)
-        onDatasetReady(info)
-      }
-    } catch {
-      setError('Error al generar el dataset. Verifica la conexión con el servidor.')
-    } finally {
-      setGenerating(false)
-    }
-  }, [onDatasetReady])
-
   const formatSize = (bytes) => {
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
@@ -114,10 +109,10 @@ export default function DatasetUpload({ onDatasetReady }) {
   return (
     <div className="dataset-upload">
       <div className="dataset-upload-header">
-        <h2>Cargar Dataset</h2>
+        <h2>Seleccionar Dataset</h2>
         <p>
-          Arrastra un archivo CSV o genera uno de ejemplo para comenzar el análisis
-          de radiación solar.
+          Sube un CSV propio o usa el dataset de ejemplo incluido para comenzar el analisis
+          de radiacion solar.
         </p>
       </div>
 
@@ -159,7 +154,7 @@ export default function DatasetUpload({ onDatasetReady }) {
                   <path d="M10 34h28" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
                 <span className="drop-zone-text">
-                  Arrastra un archivo <strong>CSV</strong> aquí
+                  Arrastra un archivo <strong>CSV</strong> aqui
                 </span>
                 <span className="drop-zone-hint">o haz clic para seleccionarlo</span>
               </div>
@@ -169,22 +164,22 @@ export default function DatasetUpload({ onDatasetReady }) {
           <div className="generate-section">
             <span className="generate-divider-text">o</span>
             <button
-              className={`btn-secondary${generating ? ' loading' : ''}`}
-              onClick={handleGenerate}
-              disabled={generating}
+              className={`btn-secondary${usingExample ? ' loading' : ''}`}
+              onClick={handleUseExample}
+              disabled={usingExample || uploading}
             >
-              {generating ? (
+              {usingExample ? (
                 <>
                   <span className="btn-spinner" />
-                  Generando...
+                  Preparando...
                 </>
               ) : (
                 <>
                   <svg className="btn-icon-svg" viewBox="0 0 20 20" fill="none" width="16" height="16">
-                    <path d="M10 2v12m0 0l-4-4m4 4l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M2 18h16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    <path d="M4 4h12v12H4z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                    <path d="M7 8h6M7 12h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                   </svg>
-                  Generar dataset de ejemplo
+                  Usar dataset de ejemplo
                 </>
               )}
             </button>
