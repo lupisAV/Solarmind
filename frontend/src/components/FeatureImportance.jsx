@@ -3,6 +3,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const COLORS_REG = ['#F59E0B', '#D97706', '#B45309', '#FBBF24', '#FDE68A', '#FEF3C7', '#FFF7ED', '#FFEDD5']
 const COLORS_CLS = ['#22D3EE', '#06B6D4', '#0891B2', '#67E8F9', '#A5F3FC', '#CFFAFE', '#ECFEFF', '#E0F2FE']
 
+// Gráficos de barras horizontales que muestran la importancia relativa de cada feature
+// para los modelos de regresión y clasificación, ordenados de mayor a menor.
 export default function FeatureImportance({ regression, classification }) {
   const regData = Object.entries(regression || {}).map(([name, value], i) => ({
     name: name.replace(/_/g, ' '),

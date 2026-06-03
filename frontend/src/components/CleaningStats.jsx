@@ -1,3 +1,5 @@
+// Muestra un resumen visual de las estadísticas de limpieza:
+// gráfico circular con el porcentaje de datos conservados y tarjetas con cada métrica.
 export default function CleaningStats({ stats }) {
   const items = [
     { label: 'Registros originales', value: stats.original_rows.toLocaleString(), color: '--solar-gold' },

@@ -3,6 +3,7 @@ import SolarPulse from './components/SolarPulse'
 import StepIndicator from './components/StepIndicator'
 import DatasetUpload from './components/DatasetUpload'
 
+// Lazy loading: los componentes pesados (gráficos, árbol SVG) se cargan bajo demanda
 const RawDataPreview = lazy(() => import('./components/RawDataPreview'))
 const CleaningStats = lazy(() => import('./components/CleaningStats'))
 const MetricsDashboard = lazy(() => import('./components/MetricsDashboard'))
@@ -11,6 +12,7 @@ const TreeVisualizer = lazy(() => import('./components/TreeVisualizer'))
 
 const API_BASE = '/api'
 
+// Estados del flujo de trabajo que controlan qué se muestra en cada paso
 const STEPS = [
   { id: 'idle', label: 'Listo', icon: '○' },
   { id: 'loading', label: 'Cargando datos', icon: '◉' },
@@ -23,6 +25,7 @@ function getStepIndex(stepId) {
   return STEPS.findIndex(s => s.id === stepId)
 }
 
+// Helper genérico para fetch con manejo de errores y parsing JSON seguro
 async function fetchJson(url, options) {
   const res = await fetch(url, options)
   let data = null
@@ -63,6 +66,7 @@ export default function App() {
     checkStatus()
   }, [checkStatus])
 
+  // Callback que se ejecuta cuando el usuario sube/selecciona un dataset exitosamente
   const handleDatasetReady = useCallback((info) => {
     setDatasetInfo(info)
     setDatasetLoaded(true)
@@ -94,6 +98,8 @@ export default function App() {
     setError(null)
   }, [])
 
+  // Flujo principal de simulación: carga datos crudos → limpia → entrena → muestra resultados.
+  // Cada etapa tiene un delay artificial para que el usuario perciba la progresión visual.
   const runSimulation = useCallback(async () => {
     setError(null)
     setCurrentStep('loading')

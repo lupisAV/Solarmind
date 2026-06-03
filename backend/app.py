@@ -19,6 +19,7 @@ from clean_and_model import (
 
 app = FastAPI(title="Solarmind Analytics API", version="2.0.0")
 
+# Configuración CORS: permite peticiones desde el frontend en desarrollo (Vite) y producción.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -39,9 +40,12 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Caché global: almacena los resultados del pipeline (limpieza + modelos + árboles)
+# para evitar recalcular en cada endpoint. Se invalida al cambiar de dataset.
 result_cache = None
 
 
+# Valida que el CSV subido contenga todas las columnas necesarias para el pipeline de ML
 def validate_dataset_columns(df):
     required_cols = FEATURE_COLS + [TARGET_COL]
     missing_cols = [col for col in required_cols if col not in df.columns]
@@ -59,6 +63,7 @@ def safe_upload_name(filename):
     return f"uploaded_{clean_stem}_{uuid4().hex[:8]}{ext.lower()}"
 
 
+# Cambia el dataset activo e invalida la caché del pipeline
 def set_active_dataset(path, filename=None):
     global DATASET_PATH, dataset_filename, result_cache
     DATASET_PATH = path
@@ -66,11 +71,14 @@ def set_active_dataset(path, filename=None):
     result_cache = None
 
 
+# Convierte NaN a None para que el JSON sea válido (JSON no soporta NaN nativo)
 def json_safe_records(df):
     safe_df = df.replace({np.nan: None})
     return safe_df.to_dict(orient="records")
 
 
+# Ejecuta el pipeline completo (limpieza + regresión + clasificación) bajo demanda
+# y lo almacena en caché para que los endpoints subsiguientes no recalculen.
 def get_pipeline_results():
     global result_cache
     if result_cache is None:
@@ -100,6 +108,8 @@ def status():
     return info
 
 
+# POST /api/dataset/upload — Recibe un CSV por multipart/form-data, lo valida,
+# lo guarda en disco y lo establece como dataset activo para el pipeline.
 @app.post("/api/dataset/upload")
 async def upload_dataset(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".csv"):
@@ -131,6 +141,7 @@ async def upload_dataset(file: UploadFile = File(...)):
     }
 
 
+# POST /api/dataset/example — Activa el dataset de ejemplo pre-generado como dataset activo.
 @app.post("/api/dataset/example")
 def use_example_dataset():
     if not os.path.exists(DEFAULT_DATASET_PATH):
@@ -149,6 +160,8 @@ def use_example_dataset():
     }
 
 
+# GET /api/dataset/generate — Genera un dataset sintético nuevo en tiempo real,
+# lo guarda como archivo CSV y lo devuelve como descarga directa.
 @app.get("/api/dataset/generate")
 def generate_dataset():
     import generate_dataset as gendata
@@ -197,6 +210,8 @@ def dataset_info():
     }
 
 
+# GET /api/data/raw — Devuelve los datos crudos paginados del dataset activo,
+# incluyendo el conteo de nulos por columna para la vista previa.
 @app.get("/api/data/raw")
 def raw_data(
     page: int = Query(1, ge=1),
@@ -228,6 +243,8 @@ def raw_data(
     }
 
 
+# GET /api/data/cleaned — Devuelve los datos ya limpios (imputados, sin duplicados ni outliers)
+# paginados, junto con las estadísticas de limpieza aplicadas.
 @app.get("/api/data/cleaned")
 def cleaned_data(
     page: int = Query(1, ge=1),
@@ -260,12 +277,16 @@ def data_stats():
     return stats
 
 
+# POST /api/simulate/run — Dispara el pipeline completo y devuelve los resultados:
+# métricas, árboles (JSON + texto) e importancia de features para ambos modelos.
 @app.post("/api/simulate/run")
 def run_simulation():
     results = get_pipeline_results()
     return results
 
 
+# GET /api/tree/regression — Devuelve el árbol de regresión en formato JSON (para SVG)
+# y en texto (para vista textual).
 @app.get("/api/tree/regression")
 def regression_tree():
     results = get_pipeline_results()
@@ -276,6 +297,8 @@ def regression_tree():
     }
 
 
+# GET /api/tree/classification — Devuelve el árbol de clasificación en JSON y texto,
+# incluyendo los nombres de las clases (Baja, Media, Alta, Muy Alta).
 @app.get("/api/tree/classification")
 def classification_tree():
     results = get_pipeline_results()
@@ -287,6 +310,8 @@ def classification_tree():
     }
 
 
+# GET /api/metrics — Retorna las métricas de evaluación de ambos modelos:
+# R², MAE, RMSE para regresión; accuracy, precision, recall, F1 para clasificación.
 @app.get("/api/metrics")
 def metrics():
     results = get_pipeline_results()
@@ -296,6 +321,8 @@ def metrics():
     }
 
 
+# GET /api/features/importance — Devuelve la importancia de cada feature (variable)
+# para ambos modelos, ordenada de mayor a menor.
 @app.get("/api/features/importance")
 def feature_importance():
     results = get_pipeline_results()
@@ -305,6 +332,8 @@ def feature_importance():
     }
 
 
+# Servir el frontend compilado (dist/) como archivos estáticos en producción.
+# Todas las rutas no capturadas por la API redirigen al index.html (SPA).
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 
 if os.path.exists(FRONTEND_DIR):
