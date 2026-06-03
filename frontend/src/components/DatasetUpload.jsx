@@ -3,6 +3,7 @@ import { useState, useRef, useCallback } from 'react'
 const API_BASE = '/api'
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
+// Función helper para procesar respuestas JSON y lanzar errores descriptivos
 async function readJsonResponse(res) {
   let data = null
   try {
@@ -31,6 +32,7 @@ export default function DatasetUpload({ onDatasetReady }) {
     onDatasetReady(info)
   }, [onDatasetReady])
 
+  // Sube un archivo CSV al backend mediante POST multipart/form-data
   const uploadFile = useCallback(async (file) => {
     if (!file.name.toLowerCase().endsWith('.csv')) {
       setError('Solo se aceptan archivos CSV (.csv)')
@@ -62,6 +64,7 @@ export default function DatasetUpload({ onDatasetReady }) {
     }
   }, [setReady])
 
+  // Activa el dataset de ejemplo pre-generado en el backend (sin subir archivo)
   const handleUseExample = useCallback(async () => {
     setError(null)
     setUsingExample(true)
@@ -77,6 +80,7 @@ export default function DatasetUpload({ onDatasetReady }) {
     }
   }, [setReady])
 
+  // Zona de arrastrar y soltar (drag & drop) para subir CSV
   const handleDrop = useCallback((e) => {
     e.preventDefault()
     setDragOver(false)

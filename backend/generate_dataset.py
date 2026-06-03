@@ -4,43 +4,59 @@ from datetime import datetime, timedelta
 import os
 
 
+# Genera un dataset sintético de radiación solar con 5500 registros horarios.
+# Simula variables meteorológicas realistas (temperatura, humedad, nubosidad, etc.)
+# e inyecta deliberadamente errores (~12% NaN, outliers, strings, negativos, duplicados)
+# para que el pipeline de limpieza tenga datos que corregir.
 def generate_dataframe(output_path=None):
     np.random.seed(42)
 
     N = 5500
     start_date = datetime(2024, 1, 1)
 
+    # Fecha/hora para cada registro (desde el 1 de enero de 2024)
     dates = [start_date + timedelta(hours=i) for i in range(N)]
 
+    # Hora numérica en formato decimal (0.0 a 23.9833...)
     hora_num = np.array([d.hour + d.minute / 60.0 for d in dates])
 
+    # Temperatura: onda senoidal con pico a las 15h, base 22°C, amplitud ±8°C, ruido gaussiano
     temp_base = 22 + 8 * np.sin(np.pi * (hora_num - 6) / 12)
     temp = np.round(temp_base + np.random.normal(0, 3, N), 1)
 
+    # Nubosidad en octas (0 = despejado, 8 = completamente cubierto)
     nubosidad = np.random.randint(0, 9, N)
 
+    # Factor estacional: modula la radiación según la época del año (verano ≈ +28%, invierno ≈ -28%)
     dias_transcurridos = np.array([(d - start_date).days for d in dates])
     day_of_year = dias_transcurridos % 365
     season_factor = 0.72 + 0.28 * np.sin(2 * np.pi * (day_of_year - 80) / 365)
 
+    # Radiación solar: base senoidal (pico al mediodía) × factor estacional
+    # Reducida por nubosidad (−6% por octa) + ruido gaussiano, recortada a [0, 1200] W/m²
     hora_efectiva = np.clip(hora_num - 6, 0, 12)
     radiacion_base = 1120 * np.sin(np.pi * hora_efectiva / 12) * season_factor
     radiacion_base *= (1 - nubosidad * 0.06)
     radiacion_base += np.random.normal(0, 25, N)
     radiacion = np.clip(np.round(radiacion_base, 1), 0, 1200)
 
+    # Humedad: inversamente proporcional a radiación y temperatura, con ruido
     humedad = np.round(np.clip(
         85 - radiacion / 15 - temp * 0.3 + np.random.normal(0, 8, N), 10, 100
     ), 1)
 
+    # Presión atmosférica: centrada en 1013 hPa con ruido gaussiano
     presion = np.round(np.clip(1013 + np.random.normal(0, 5, N), 990, 1040), 1)
 
+    # Velocidad del viento: distribución de Weibull (sesgada a valores bajos)
     viento = np.round(np.clip(np.random.weibull(1.8, N) * 5, 0, 25), 1)
 
+    # Ángulo zenital: 0° al mediodía (sol en cenit), 90° en el horizonte
     angulo_zenital = np.round(np.clip(
         90 * np.cos(np.pi * (hora_num - 12) / 12) + np.random.normal(0, 3, N), 0, 90
     ), 1)
 
+    # Precipitación: mayor probabilidad con alta nubosidad (distribución exponencial)
     precip = np.round(np.clip(
         np.where(nubosidad > 5, np.random.exponential(3, N), np.random.exponential(0.5, N)),
         0, 50
@@ -68,9 +84,12 @@ def generate_dataframe(output_path=None):
         "angulo_zenital", "precipitacion"
     ]
 
+    # Convierte las columnas numéricas a object para poder inyectar strings como errores
     for col in cols_numeric:
         df[col] = df[col].astype(object)
 
+    # Inyección de errores en ~12% de los registros para probar el pipeline de limpieza
+    # Tipos de error: NaN, outlier (valores extremos), string (texto en columna numérica), negativo
     error_indices = np.random.choice(N, size=int(N * 0.12), replace=False)
 
     for i in error_indices:
@@ -87,11 +106,13 @@ def generate_dataframe(output_path=None):
         elif error_type == "negative" and col not in ["temperatura", "hora_numerica"]:
             df.loc[i, col] = -abs(float(df.loc[i, col]))
 
+    # Se añaden 18 filas duplicadas para probar la eliminación de duplicados
     duplicate_count = 18
     dup_indices = np.random.choice(N, size=duplicate_count, replace=False)
     dupes = df.loc[dup_indices].copy()
     df = pd.concat([df, dupes], ignore_index=True)
 
+    # Se reemplazan 35 celdas con string vacío (otro tipo de error a limpiar)
     extra_blank = np.random.choice(N, size=35, replace=False)
     for i in extra_blank:
         col = np.random.choice(cols_numeric)

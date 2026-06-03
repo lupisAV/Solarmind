@@ -1,21 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 
-const NODE_W = 220
-const NODE_H = 74
-const LEVEL_H = 122
-const LEAF_GAP = 34
-const SUMMARY_DEPTH = 3
+// Constantes de layout para el renderizado SVG del árbol
+const NODE_W = 220   // Ancho de cada nodo
+const NODE_H = 74    // Alto de cada nodo
+const LEVEL_H = 122  // Espaciado vertical entre niveles
+const LEAF_GAP = 34  // Separación horizontal entre hojas
+const SUMMARY_DEPTH = 3  // Profundidad visible en la vista resumida
 
+// Componente principal de visualización interactiva del árbol de decisión.
+// Renderiza el árbol completo como SVG con nodos cliqueables, panel de detalles,
+// y alternancia entre vista gráfica y textual.
 export default function TreeVisualizer({ treeJson, treeText, type, classNames }) {
   const [selectedNode, setSelectedNode] = useState(treeJson?.id ?? null)
   const [showSvg, setShowSvg] = useState(true)
   const [fitToView, setFitToView] = useState(true)
   const scrollRef = useRef(null)
 
+  // Sincroniza el nodo seleccionado con el árbol actual (resetea al nodo raíz cuando cambia el árbol)
   useEffect(() => {
     setSelectedNode(treeJson?.id ?? null)
   }, [treeJson])
 
+  // Auto-scroll horizontal para centrar el nodo raíz cuando el árbol cambia
   useEffect(() => {
     if (!scrollRef.current || !treeJson || !showSvg || fitToView) return
 
@@ -151,6 +157,8 @@ export default function TreeVisualizer({ treeJson, treeText, type, classNames })
   )
 }
 
+// Arista del árbol: línea curva de Bezier desde el nodo padre al hijo, con etiqueta "Si"/"No".
+// El color difiere según la rama (izquierda = dorado, derecha = cyan).
 function TreeEdge({ parent, child, label, tone }) {
   if (!parent || !child) return null
 
@@ -185,6 +193,7 @@ function TreeEdge({ parent, child, label, tone }) {
   )
 }
 
+// Contenido de un nodo de decisión (no hoja): muestra la feature, el umbral y estadísticas
 function DecisionContent({ node }) {
   return (
     <>
@@ -201,6 +210,8 @@ function DecisionContent({ node }) {
   )
 }
 
+// Contenido de un nodo hoja: predicción (W/m² o clase) y cantidad de muestras.
+// Si es una hoja del árbol podado (resumen), indica cuántos nodos quedan ocultos.
 function LeafContent({ node, type, classNames }) {
   const hasHiddenChildren = Boolean(node.hasHiddenChildren)
 
@@ -219,6 +230,8 @@ function LeafContent({ node, type, classNames }) {
   )
 }
 
+// Panel lateral de detalles: muestra ruta desde la raíz, condición del nodo,
+// predicción/salida, y estadísticas (muestras, impureza, ramas).
 function NodeDetails({ node, root, type, classNames }) {
   if (!node) return null
 
@@ -300,6 +313,8 @@ function collectAllNodes(node) {
   return [node, ...collectAllNodes(node.left), ...collectAllNodes(node.right)]
 }
 
+// Poda el árbol a una profundidad máxima para la vista resumida.
+// Las hojas artificiales resultantes indican cuántos nodos quedan ocultos debajo.
 function pruneTree(node, maxDepth, depth = 0) {
   if (!node) return null
   if (depth >= maxDepth || node.is_leaf) {
@@ -321,6 +336,8 @@ function pruneTree(node, maxDepth, depth = 0) {
   }
 }
 
+// Calcula las posiciones (x, y) de cada nodo para el layout SVG.
+// Las hojas se distribuyen horizontalmente; los nodos internos se centran entre sus hijos.
 function layoutTree(root) {
   const positions = {}
   const leaves = countLeaves(root)
@@ -383,6 +400,8 @@ function formatPrediction(node, type, classNames) {
   return `Clase ${node.predicted_class}`
 }
 
+// Recorre recursivamente la ruta desde la raíz hasta el nodo seleccionado,
+// registrando cada decisión (feature, umbral, dirección Si/No).
 function getPathToNode(root, targetId) {
   if (!root || targetId == null) return []
 

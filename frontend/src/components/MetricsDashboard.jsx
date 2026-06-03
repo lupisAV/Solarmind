@@ -1,5 +1,7 @@
 import React from 'react'
 
+// Componente principal: muestra las métricas de regresión y clasificación en tarjetas,
+// más la matriz de confusión como heatmap para el modelo de clasificación.
 export default function MetricsDashboard({ metrics }) {
   const { regression, classification } = metrics
 
@@ -45,6 +47,7 @@ export default function MetricsDashboard({ metrics }) {
   )
 }
 
+// Tarjeta individual de métrica: formatea el valor según su tipo (porcentaje, decimal, entero, número)
 function MetricCard({ label, value, format, suffix = '' }) {
   let display = value
   if (format === 'percent') display = (value * 100).toFixed(1) + '%'
@@ -60,6 +63,8 @@ function MetricCard({ label, value, format, suffix = '' }) {
   )
 }
 
+// Matriz de confusión renderizada como grid con intensidad de color proporcional al valor.
+// La diagonal (predicciones correctas) se resalta visualmente.
 function ConfusionMatrix({ matrix, labels }) {
   const maxVal = Math.max(...matrix.flat())
 
